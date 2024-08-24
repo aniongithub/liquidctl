@@ -11,7 +11,7 @@ import liquidctl.cli
 def main(monkeypatch, capsys):
     """Return a function f(*args) to run main with `args` as `sys.argv`."""
     def call_with_args(*args):
-        monkeypatch.setattr(sys, 'argv', args)
+        monkeypatch.setattr(sys, 'argv', list(args))
         try:
             liquidctl.cli.main()
         except SystemExit as exit:
@@ -39,7 +39,7 @@ def test_json_list(main):
             'address': 'virtual_address',
             'port': None,
             'driver': 'VirtualBusDevice',
-            'experimental': True,
+            'experimental': False,
         }
     ]
     assert got == exp

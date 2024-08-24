@@ -10,6 +10,7 @@ Supported devices:
 Copyright Tom Frey, Jonas Malaco, Shady Nawara and contributors
 SPDX-License-Identifier: GPL-3.0-or-later
 """
+
 # uses the psf/black style
 
 import itertools
@@ -25,7 +26,7 @@ if sys.platform == "win32":
     from winusbcdc import WinUsbPy
 
 from liquidctl.driver.usb import PyUsbDevice, UsbHidDriver
-from liquidctl.error import NotSupportedByDevice
+from liquidctl.error import NotSupportedByDevice, NotSupportedByDriver
 from liquidctl.util import (
     LazyHexRepr,
     normalize_profile,
@@ -212,6 +213,7 @@ class KrakenX3(UsbHidDriver):
         self._speed_channels = speed_channels
         self._color_channels = color_channels
         self._hwmon_ctrl_mapping = hwmon_ctrl_mapping
+        self._fw = None
 
     def initialize(self, direct_access=False, **kwargs):
         """Initialize the device and the driver.
@@ -247,11 +249,11 @@ class KrakenX3(UsbHidDriver):
         self._status = []
 
         self._read_until({b"\x11\x01": self.parse_firm_info, b"\x21\x03": self.parse_led_info})
+        self._status.append(("Firmware version", f"{self._fw[0]}.{self._fw[1]}.{self._fw[2]}", ""))
         return sorted(self._status)
 
     def parse_firm_info(self, msg):
-        fw = f"{msg[0x11]}.{msg[0x12]}.{msg[0x13]}"
-        self._status.append(("Firmware version", fw, ""))
+        self._fw = (msg[0x11], msg[0x12], msg[0x13])
 
     def parse_led_info(self, msg):
         channel_count = msg[14]
@@ -559,7 +561,7 @@ class KrakenZ3(KrakenX3):
         (
             0x1E71,
             0x3008,
-            "NZXT Kraken Z (Z53, Z63 or Z73) (experimental)",
+            "NZXT Kraken Z (Z53, Z63 or Z73)",
             {
                 "speed_channels": _SPEED_CHANNELS_KRAKENZ,
                 "color_channels": _COLOR_CHANNELS_KRAKENZ,
@@ -571,7 +573,7 @@ class KrakenZ3(KrakenX3):
         (
             0x1E71,
             0x300C,
-            "NZXT Kraken 2023 Elite (experimental)",
+            "NZXT Kraken 2023 Elite (broken)",
             {
                 "speed_channels": _SPEED_CHANNELS_KRAKEN2023,
                 "color_channels": _COLOR_CHANNELS_KRAKEN2023,
@@ -583,7 +585,7 @@ class KrakenZ3(KrakenX3):
         (
             0x1E71,
             0x300E,
-            "NZXT Kraken 2023 (experimental)",
+            "NZXT Kraken 2023",
             {
                 "speed_channels": _SPEED_CHANNELS_KRAKEN2023,
                 "color_channels": _COLOR_CHANNELS_KRAKEN2023,
@@ -646,6 +648,15 @@ class KrakenZ3(KrakenX3):
                 return True
         return False
 
+    def _get_fw_version(self, clear_reports=True):
+        if self._fw is not None:
+            return  # Already cached
+
+        if clear_reports:
+            self.device.clear_enqueued_reports()
+        self._write([0x10, 0x01])  # firmware info
+        self._read_until({b"\x11\x01": self.parse_firm_info})
+
     def initialize(self, direct_access=False, **kwargs):
         """Initialize the device and the driver.
 
@@ -678,8 +689,8 @@ class KrakenZ3(KrakenX3):
         self._status = []
 
         # request static infos
-        self._write([0x10, 0x01])  # firmware info
-        self._read_until({b"\x11\x01": self.parse_firm_info})
+        self._get_fw_version(clear_reports=False)
+        self._status.append(("Firmware version", f"{self._fw[0]}.{self._fw[1]}.{self._fw[2]}", ""))
 
         self._write([0x30, 0x01])  # lcd info
         self._read_until({b"\x31\x01": self.parse_lcd_info})
@@ -770,6 +781,13 @@ class KrakenZ3(KrakenX3):
             self.brightness = msg[0x18]
             self.orientation = msg[0x1A]
 
+        def _is_2023_fw_version2():
+            device_product_id = self.device.product_id
+            if device_product_id == 0x300E:
+                self._get_fw_version()
+                return self._fw[0] == 2
+            return False
+
         self._read_until({b"\x31\x01": parse_lcd_info})
 
         if mode == "brightness":
@@ -785,10 +803,26 @@ class KrakenZ3(KrakenX3):
             self._write([0x30, 0x02, 0x01, self.brightness, 0x0, 0x0, 0x1, int(value_int / 90)])
             return
         elif mode == "static":
-            data = self._prepare_static_file(value, self.orientation)
-            self._send_data(data, [0x06, 0x0, 0x0, 0x0] + list(len(data).to_bytes(4, "little")))
+            if _is_2023_fw_version2():
+                data = self._prepare_static_file_rgb16(value, self.orientation)
+                self._send_2023_data_fw2(
+                    data, [0x06, 0x0, 0x0, 0x0] + list(len(data).to_bytes(4, "little"))
+                )
+                # sending it twice is only required once after initialization
+                # the same behaviour is observed in manufacturer at init
+                # some soft of framebuffer swapping?
+                self._send_2023_data_fw2(
+                    data, [0x06, 0x0, 0x0, 0x0] + list(len(data).to_bytes(4, "little"))
+                )
+            else:
+                data = self._prepare_static_file(value, self.orientation)
+                self._send_data(data, [0x02, 0x0, 0x0, 0x0] + list(len(data).to_bytes(4, "little")))
             return
         elif mode == "gif":
+            if _is_2023_fw_version2():
+                raise NotSupportedByDriver(
+                    "gif images are not supported on firmware 2.X.Y, please see issue #631"
+                )
             data = self._prepare_gif_file(value, self.orientation)
             assert (
                 len(data) / 1000 < _LCD_TOTAL_MEMORY
@@ -833,6 +867,28 @@ class KrakenZ3(KrakenX3):
             #result.append(0)
         return result
 
+    def _prepare_static_file_rgb16(self, path, rotation):
+        """
+        path is the path to any image file
+        Rotation is expected as 0 = no rotation, 1 = 90 degrees, 2 = 180 degrees, 3 = 270 degrees
+        """
+        data = (
+            Image.open(path)
+            .resize(self.lcd_resolution)
+            .rotate(rotation * -90)
+            .convert("RGB")
+            .getdata()
+        )
+        result = []
+        pixelDataIndex = 0
+        for pixelDataIndex in range(0, len(data)):
+            dr = data[pixelDataIndex][0] >> 3
+            dg = data[pixelDataIndex][1] >> 2
+            db = data[pixelDataIndex][2] >> 3
+            result.append((dr << 3) + (dg >> 3))
+            result.append(((dg & 0x7) << 5) + db)
+        return result
+
     def _prepare_gif_file(self, path, rotation):
         """
         path is the path of the gif file
@@ -865,6 +921,35 @@ class KrakenZ3(KrakenX3):
         )
 
         return result_bytes.getvalue()
+
+    def _send_2023_data_fw2(self, data, bulkInfo):
+        """
+        This method is intended for Kraken 2023 firmware version 2.X.Y
+        sends image or gif to device
+        data is an array of bytes to write
+        bulk info contains info about the transfer
+        """
+        self._write_then_read([0x36, 0x01, 0x00, 0x01, 0x06])  # start data transfer
+        header = [
+            0x12,
+            0xFA,
+            0x01,
+            0xE8,
+            0xAB,
+            0xCD,
+            0xEF,
+            0x98,
+            0x76,
+            0x54,
+            0x32,
+            0x10,
+        ] + bulkInfo
+        self._bulk_write(header)
+
+        for i in range(0, len(data), self.bulk_buffer_size):  # start sending data in chunks
+            self._bulk_write(list(data[i : i + self.bulk_buffer_size]))
+
+        self._write_then_read([0x36, 0x02])  # end data transfer
 
     def _send_data(self, data, bulkInfo):
         """

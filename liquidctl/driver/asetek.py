@@ -351,7 +351,7 @@ class Legacy690Lc(_Base690Lc):
             self._data = runtime_storage
         else:
             ids = f'vid{self.vendor_id:04x}_pid{self.product_id:04x}'
-            loc = f'bus{self.bus}_port{"_".join(map(str, self.port))}'
+            loc = f'bus{self.bus}_address{self.address}'
             self._data = RuntimeStorage(key_prefixes=[ids, loc, 'legacy'])
         return ret
 
@@ -436,9 +436,9 @@ class Hydro690Lc(_ModernBase690Lc):
     """Corsair-branded fifth generation Asetek 690LC cooler."""
 
     _MATCHES = [
-        (0x1b1c, 0x0c02, 'Corsair Hydro H80i GT (experimental)', {}),
-        (0x1b1c, 0x0c03, 'Corsair Hydro H100i GTX (experimental)', {}),
-        (0x1b1c, 0x0c07, 'Corsair Hydro H110i GTX (experimental)', {}),
+        (0x1b1c, 0x0c02, 'Corsair Hydro H80i GT', {}),
+        (0x1b1c, 0x0c03, 'Corsair Hydro H100i GTX', {}),
+        (0x1b1c, 0x0c07, 'Corsair Hydro H110i GTX', {}),
         (0x1b1c, 0x0c08, 'Corsair Hydro H80i v2', {}),
         (0x1b1c, 0x0c09, 'Corsair Hydro H100i v2', {}),
         (0x1b1c, 0x0c0a, 'Corsair Hydro H115i', {}),

@@ -166,11 +166,13 @@ they will be removed in a future version and are kept for now for backward compa
 | `backwards-rainbow-pulse` | None | ✓ |
 
 
-## The LCD screen (only Z and 2023 models; experimental)
+## The LCD screen (only Z and 2023 models)
 
 _New in git._<br>
 
 Adds support for NZXT Kraken 2023 Standard, Elite
+
+*On 2023 models (standard and Elite), GIF screen mode is no longer supported for firmware versions 2.X (see [#631][`issue-631`]).*
 
 _New in 1.11.0._<br>
 
@@ -200,3 +202,4 @@ directly accessing the device. Alternatively, direct access to the device can
 be forced with `--direct-access`.
 
 [liquidtux]: https://github.com/liquidctl/liquidtux
+[`issue-631`]: https://github.com/liquidctl/liquidctl/issues/631
