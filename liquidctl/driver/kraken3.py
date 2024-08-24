@@ -786,7 +786,7 @@ class KrakenZ3(KrakenX3):
             return
         elif mode == "static":
             data = self._prepare_static_file(value, self.orientation)
-            self._send_data(data, [0x02, 0x0, 0x0, 0x0] + list(len(data).to_bytes(4, "little")))
+            self._send_data(data, [0x06, 0x0, 0x0, 0x0] + list(len(data).to_bytes(4, "little")))
             return
         elif mode == "gif":
             data = self._prepare_gif_file(value, self.orientation)
@@ -823,10 +823,14 @@ class KrakenZ3(KrakenX3):
         result = []
         pixelDataIndex = 0
         for pixelDataIndex in range(0, len(data)):
-            result.append(data[pixelDataIndex][0])
-            result.append(data[pixelDataIndex][1])
-            result.append(data[pixelDataIndex][2])
-            result.append(0)
+            dr = (data[pixelDataIndex][0] >> 3)
+            dg = (data[pixelDataIndex][1] >> 2)
+            db = (data[pixelDataIndex][2] >> 3)
+            result.append((dr << 3) + (dg >> 3))
+
+            result.append(((dg & 0x7) << 5) + db )
+            #result.append(data[pixelDataIndex][2])
+            #result.append(0)
         return result
 
     def _prepare_gif_file(self, path, rotation):
@@ -869,19 +873,6 @@ class KrakenZ3(KrakenX3):
         bulk info contains info about the transfer
         """
 
-        assert self.bulk_device, "Cannot find bulk out device"
-
-        self._write_then_read([0x36, 0x03])  # unknown
-
-        buckets = self._query_buckets()  # query all buckets and store their response
-        bucketIndex = self._find_next_unoccupied_bucket(
-            buckets
-        )  # find the first unoccupied bucket in the list
-
-        bucketIndex = self._prepare_bucket(
-            bucketIndex if bucketIndex != -1 else 0, bucketIndex == -1
-        )  # prepare bucket or find a more suitable one
-
         # first bulk write message contains a standard part and information about the transfer
         header = [
             0x12,
@@ -895,37 +886,16 @@ class KrakenZ3(KrakenX3):
             0x76,
             0x54,
             0x32,
-            0x10,
+            0x10
         ] + bulkInfo
 
-        dataSize = math.ceil((len(header) + len(data)) / 1024)
-        dataSizeBytes = list(
-            # calculates the number of needed packets
-            dataSize.to_bytes(2, "little")
-        )
-        bucketMemoryStart = self._get_bucket_memory_offset(
-            buckets, bucketIndex, dataSize
-        )  # extracts the bucket starting address
-
-        if bucketMemoryStart == -1:  # cant find a good memory start
-            self._delete_all_buckets()
-            bucketIndex = 0  # start from byte 0
-            bucketMemoryStart = [0x0, 0x0]
-
-        # setup bucket for transfer
-        if not self._setup_bucket(bucketIndex, bucketIndex + 1, bucketMemoryStart, dataSizeBytes):
-            _LOGGER.error("Failed to setup bucket for data transfer")
-
-        self._write_then_read([0x36, 0x01, bucketIndex])  # start data transfer
+        self._write_then_read([0x36, 0x01, 0x00, 0x01, 0x06])  # start data transfer
         self._bulk_write(header)
 
         for i in range(0, len(data), self.bulk_buffer_size):  # start sending data in chunks
             self._bulk_write(list(data[i : i + self.bulk_buffer_size]))
-
-        self._write([0x36, 0x02])  # end data transfer
-        # switch to newly written bucket
-        if not self._switch_bucket(bucketIndex):
-            _LOGGER.error("Failed to switch active bucket")
+        
+        self._write([0x36, 0x02])
 
     def _query_buckets(self):
         """
