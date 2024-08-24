@@ -2,3 +2,6 @@ python3 liquidctl/cli.py set lcd screen static <filename>
 python3 liquidctl/cli.py set lcd screen liquid
 python3 liquidctl/cli.py set lcd screen orientation <0/90/180/270>
 python3 liquidctl/cli.py set lcd screen brightness <0-100>
+
+# Note - this needs to select the RGB device specifically!
+python3 liquidctl/cli.py -m RGB set sync color spectrum-wave
